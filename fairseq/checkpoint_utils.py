@@ -536,6 +536,26 @@ def torch_persistent_save(obj, filename: str, async_write: bool = False, async_c
             with PathManager.open(filename, "wb") as f:
                 _torch_persistent_save(obj, f)
 
+# copied from lora.utils,
+# modified to fit for fairseq style ckpt
+def lora_state_dict(model, bias: str = 'none') -> Dict[str, torch.Tensor]:
+    # my_state_dict = model.state_dict()
+    my_state_dict = model
+    if bias == 'none':
+        return {k: my_state_dict[k] for k in my_state_dict if 'lora_' in k}
+    elif bias == 'all':
+        return {k: my_state_dict[k] for k in my_state_dict if 'lora_' in k or 'bias' in k}
+    elif bias == 'lora_only':
+        to_return = {}
+        for k in my_state_dict:
+            if 'lora_' in k:
+                to_return[k] = my_state_dict[k]
+                bias_name = k.split('lora_')[0]+'bias'
+                if bias_name in my_state_dict:
+                    to_return[bias_name] = my_state_dict[bias_name]
+        return to_return
+    else:
+        raise NotImplementedError
 
 def _torch_persistent_save(obj, f, num_retries=3):
     if isinstance(f, str):
@@ -544,7 +564,9 @@ def _torch_persistent_save(obj, f, num_retries=3):
         return
     for i in range(num_retries):
         try:
-            return torch.save(obj, f)
+            print('save lora weights...')
+            obj['model'] = lora_state_dict(obj["model"]) # only save lora params
+            return torch.save(obj, f) 
         except Exception:
             if i == num_retries - 1:
                 logger.error(traceback.format_exc())
